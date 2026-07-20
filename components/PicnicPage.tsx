@@ -4,10 +4,11 @@ import { useState } from "react";
 import type { PicnicData } from "@/lib/picnic-data";
 import type { SnackId } from "@/lib/snacks";
 import { ScrollHero } from "@/components/ScrollHero";
-import { ClaimForm } from "@/components/ClaimForm";
 import { ToolsOrbit } from "@/components/ToolsOrbit";
 import { HowItWorks } from "@/components/HowItWorks";
 import { ProofFooter } from "@/components/ProofFooter";
+import { GummieBackground } from "@/components/GummieBackground";
+import { StoryBanner } from "@/components/StoryBanner";
 
 type PicnicPageProps = {
   greetingName: string;
@@ -19,6 +20,7 @@ export function PicnicPage({ greetingName, data }: PicnicPageProps) {
 
   return (
     <>
+      <GummieBackground />
       <ScrollHero
         greetingName={greetingName}
         selectedSnacks={selectedSnacks}
@@ -27,13 +29,7 @@ export function PicnicPage({ greetingName, data }: PicnicPageProps) {
 
       <div className="post-hero">
         <div className="page content-stack">
-          <ClaimForm selectedSnacks={selectedSnacks} />
-
-          <section className="story-intro" id="story">
-            <p className="handwrite story-only-copy">
-              how Gumloop helps you keep your tools in one basket
-            </p>
-          </section>
+          <StoryBanner />
 
           <HowItWorks shown />
           <ToolsOrbit data={data} shown chipNumber="02" />

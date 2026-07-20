@@ -1,26 +1,7 @@
 import type { Metadata } from "next";
-import { Inter, Caveat, JetBrains_Mono } from "next/font/google";
+import { GeistSans } from "geist/font/sans";
+import { GeistMono } from "geist/font/mono";
 import "@/styles/picnic.css";
-
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-  display: "swap",
-});
-
-const caveat = Caveat({
-  subsets: ["latin"],
-  weight: ["600", "700"],
-  variable: "--font-caveat",
-  display: "swap",
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  weight: ["500"],
-  variable: "--font-jetbrains",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: "All your tools. One basket. · Gumloop",
@@ -35,9 +16,10 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${caveat.variable} ${jetbrainsMono.variable}`}
+      className={`${GeistSans.variable} ${GeistMono.variable}`}
     >
-      <body>{children}</body>
+      {/* Gellix files not in repo yet — headings use Geist Medium until brand font ships */}
+      <body className={GeistSans.className}>{children}</body>
     </html>
   );
 }

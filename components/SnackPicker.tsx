@@ -20,7 +20,7 @@ export function SnackPicker({ selected, onChange }: SnackPickerProps) {
 
   return (
     <div className="snack-picker" role="group" aria-label="Choose picnic snacks">
-      <p className="snack-picker-label">Pick your snacks</p>
+      <p className="snack-picker-label">Pick up to {MAX_SNACKS} snacks</p>
       <div className="snack-grid">
         {SNACK_OPTIONS.map((snack) => {
           const isSelected = selected.includes(snack.id);

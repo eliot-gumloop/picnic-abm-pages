@@ -58,7 +58,9 @@ export function ClaimForm({ selectedSnacks }: ClaimFormProps) {
     return (
       <section className="claim-section" id="claimPanel">
         <div className="card form-card form-done">
-          <PartyPopper size={36} />
+          <span className="form-done-icon" aria-hidden="true">
+            <PartyPopper size={24} strokeWidth={2} />
+          </span>
           <h3>Your picnic basket is on its way!</h3>
           <p>More info from Gumloop and the shipping details will be sent ASAP.</p>
           {snackLabels.length > 0 && (
@@ -81,11 +83,11 @@ export function ClaimForm({ selectedSnacks }: ClaimFormProps) {
           <input name="name" type="text" autoComplete="name" required />
         </label>
         <label className="field">
-          <span>Company email</span>
+          <span>Work Email</span>
           <input name="email" type="email" autoComplete="email" required />
         </label>
         <label className="field">
-          <span>Shipping address</span>
+          <span>Preferred Shipping Address</span>
           <textarea name="address" rows={2} autoComplete="street-address" required />
         </label>
         <button type="submit" className="cta-btn cta-btn-compact" id="submitBtn" disabled={submitting}>

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "scroll-animations": {
+      "source": "dylantarre/animation-principles",
+      "sourceType": "github",
+      "skillPath": "skills/05-by-animation-type/scroll-animations/SKILL.md",
+      "computedHash": "1dd984a631d29f3ede3cbe3302e8998560e5426761a5f57ed7bb4e74cb8ad2a3"
+    }
+  }
+}

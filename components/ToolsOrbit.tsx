@@ -52,10 +52,12 @@ export function ToolsOrbit({ data, shown = true, chipNumber = "01" }: ToolsOrbit
     <>
       <section className={`reveal${shown ? " shown" : ""}`} id="toolsSection">
         <div className="section-head">
-          <span className="num-chip">{chipNumber}</span>
-          <h2 className="section-title">Everything Gumloop packs for you</h2>
+          <p className="section-label">
+            <span className="section-label-num">{chipNumber}</span>
+          </p>
+          <h2 className="section-title">Everything Gumloop packs</h2>
         </div>
-        <p className="section-note">
+        <p className="section-note section-note-flush">
           Your whole stack connects to Gumloop.{" "}
           <span className="section-note-accent">Tap any tool.</span>
         </p>

@@ -1,4 +1,10 @@
 export const SNACK_OPTIONS = [
+  { id: "hot-honey-popcorn", label: "Hot Honey Popcorn" },
+  { id: "raisin-rosemary-crisps", label: "Raisin Rosemary Crisps" },
+  { id: "pita-chips", label: "Pita Chips" },
+  { id: "california-apricots", label: "California Apricots" },
+  { id: "rosemary-marcona-almonds", label: "Rosemary Marcona Almonds" },
+  { id: "sweet-spicy-pecans", label: "Sweet and Spicy Pecans" },
   { id: "fig-olive-crisps", label: "Fig and Olive Crisps" },
   { id: "local-honey", label: "Local Honey" },
   { id: "cookie-butter", label: "Cookie Butter" },
