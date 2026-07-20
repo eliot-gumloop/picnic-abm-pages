@@ -19,6 +19,11 @@ type ToolsOrbitProps = {
 
 const R = 39;
 
+const ORBIT_LOGO_OVERRIDES: Record<string, string> = {
+  Shopify: "/logos/shopify-mark.png",
+  Semrush: "/logos/semrush-mark.png",
+};
+
 function orbitPos(i: number, count: number) {
   const ang = (-90 + i * (360 / count)) * (Math.PI / 180);
   const x = Number((50 + R * Math.cos(ang)).toFixed(2));
@@ -111,7 +116,7 @@ export function ToolsOrbit({ data, shown = true, chipNumber = "01" }: ToolsOrbit
                 }}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={data.logos[name]} alt={name} />
+                <img src={ORBIT_LOGO_OVERRIDES[name] ?? data.logos[name]} alt={name} />
                 <span className="tt-label">{name}</span>
               </div>
             );
