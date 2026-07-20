@@ -7,7 +7,6 @@ import { ScrollHero } from "@/components/ScrollHero";
 import { ToolsOrbit } from "@/components/ToolsOrbit";
 import { HowItWorks } from "@/components/HowItWorks";
 import { ProofFooter } from "@/components/ProofFooter";
-import { GummieBackground } from "@/components/GummieBackground";
 import { StoryBanner } from "@/components/StoryBanner";
 
 type PicnicPageProps = {
@@ -20,7 +19,6 @@ export function PicnicPage({ greetingName, data }: PicnicPageProps) {
 
   return (
     <>
-      <GummieBackground />
       <ScrollHero
         greetingName={greetingName}
         selectedSnacks={selectedSnacks}

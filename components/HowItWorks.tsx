@@ -1,9 +1,9 @@
-import { BlobBullet, type BlobKind } from "@/components/BlobBullet";
+import { GlyphMark, type GlyphId } from "@/components/GlyphMark";
 
-const STEPS: { blob: BlobKind; title: string; detail: string }[] = [
-  { blob: "clover", title: "Describe the job", detail: "Plain language, no engineering." },
-  { blob: "triangle", title: "Agent runs it", detail: "Across your connected tools." },
-  { blob: "square", title: "Save it as a skill", detail: "Share it with the whole team." },
+const STEPS: { glyph: GlyphId; title: string; detail: string }[] = [
+  { glyph: "cloud", title: "Describe the job", detail: "Plain language, no engineering." },
+  { glyph: "triangle", title: "Agent runs it", detail: "Across your connected tools." },
+  { glyph: "square", title: "Save it as a skill", detail: "Share it with the whole team." },
 ];
 
 export function HowItWorks({ shown = true }: { shown?: boolean }) {
@@ -20,7 +20,7 @@ export function HowItWorks({ shown = true }: { shown?: boolean }) {
         {STEPS.map((step, index) => (
           <div className={`flow-step flow-step-accent-${index + 1}`} key={step.title}>
             <span className="flow-blob" aria-hidden="true">
-              <BlobBullet kind={step.blob} size={28} />
+              <GlyphMark id={step.glyph} size={32} />
             </span>
             <div>
               <div className="flow-t">{step.title}</div>
