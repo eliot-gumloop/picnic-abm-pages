@@ -6,6 +6,7 @@ import { ClaimForm } from "@/components/ClaimForm";
 import type { SnackId } from "@/lib/snacks";
 
 const HERO_VIDEO_SRC = "/picnic-food-video.mp4";
+const HERO_VIDEO_POSTER = "/picnic-food-poster.jpg";
 /** Snacks appear as soon as the user begins scrolling */
 const SNACK_REVEAL_PROGRESS = 0.012;
 /** Ignore seeks smaller than ~1 frame at 30fps */
@@ -62,7 +63,10 @@ export function ScrollHero({
     document.body.classList.remove("picnic-scroll-lock");
 
     video.muted = true;
+    video.defaultMuted = true;
     video.playsInline = true;
+    video.setAttribute("playsinline", "");
+    video.setAttribute("webkit-playsinline", "");
     video.preload = "auto";
     video.pause();
 
@@ -79,9 +83,30 @@ export function ScrollHero({
     const isSeekingRef = { current: false };
     const needsSeekRef = { current: false };
     const videoDoneRef = { current: reduced };
+    const videoUnlockedRef = { current: false };
     const rafRef = { current: 0 };
     let scrollStopTimer = 0;
     let clamping = false;
+
+    /** iOS often won't paint seek frames until a muted play() has run. */
+    const unlockVideoForScrub = () => {
+      if (videoUnlockedRef.current) return;
+      videoUnlockedRef.current = true;
+      video.muted = true;
+      const playAttempt = video.play();
+      const settle = () => {
+        video.pause();
+        needsSeekRef.current = true;
+        if (!isSeekingRef.current) seekToProgress();
+      };
+      if (playAttempt && typeof playAttempt.then === "function") {
+        playAttempt.then(settle).catch(() => {
+          videoUnlockedRef.current = false;
+        });
+      } else {
+        settle();
+      }
+    };
 
     const publishProgress = (progress: number) => {
       wrap.style.setProperty("--scroll-p", progress.toFixed(4));
@@ -230,6 +255,7 @@ export function ScrollHero({
     const updateFromScroll = () => {
       if (clamping) return;
 
+      unlockVideoForScrub();
       clampToHeroIfNeeded();
 
       const now = performance.now();
@@ -258,6 +284,7 @@ export function ScrollHero({
     const onLoaded = () => {
       if (!Number.isFinite(video.duration) || video.duration <= 0) return;
       durationRef.current = video.duration;
+      unlockVideoForScrub();
       video.pause();
       updateFromScroll();
     };
@@ -276,6 +303,8 @@ export function ScrollHero({
     const touchStartY = { current: 0 };
     const onTouchStart = (event: TouchEvent) => {
       touchStartY.current = event.touches[0]?.clientY ?? 0;
+      // User gesture fallback when autoplay unlock is blocked.
+      unlockVideoForScrub();
     };
     const onTouchMove = (event: TouchEvent) => {
       if (videoDoneRef.current || reduced) return;
@@ -368,6 +397,7 @@ export function ScrollHero({
               ref={videoRef}
               className="scroll-hero-video"
               src={HERO_VIDEO_SRC}
+              poster={HERO_VIDEO_POSTER}
               muted
               playsInline
               preload="auto"
