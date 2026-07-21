@@ -55,7 +55,15 @@ Or deploy this as the main `gumloop.com` site if it only needs the picnic pages.
 
 ## Form webhook
 
-The claim form validates locally and shows a success message without sending data anywhere. To connect a webhook later, set `NEXT_PUBLIC_WEBHOOK_URL` and update `components/ClaimForm.tsx`.
+Claim submissions POST to `/api/claim`, which triggers a Gumloop flow via
+`start_pipeline`. Set these **server-only** env vars (see `.env.example`):
+
+- `GUMLOOP_API_KEY`
+- `GUMLOOP_USER_ID`
+- `GUMLOOP_SAVED_ITEM_ID`
+- `GUMLOOP_PROJECT_ID` (optional team/project id)
+
+Never put the API key in a `NEXT_PUBLIC_*` variable.
 
 ## Assets
 

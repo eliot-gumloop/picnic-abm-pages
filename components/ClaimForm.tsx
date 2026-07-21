@@ -22,7 +22,7 @@ export function ClaimForm({ selectedSnacks }: ClaimFormProps) {
     (s) => s.label,
   );
 
-  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setStatus({ type: "", message: "" });
 
@@ -48,10 +48,29 @@ export function ClaimForm({ selectedSnacks }: ClaimFormProps) {
     }
 
     setSubmitting(true);
-    window.setTimeout(() => {
+    try {
+      const res = await fetch("/api/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setStatus({
+          type: "err",
+          message: data.error || "Could not submit your claim. Please try again.",
+        });
+        return;
+      }
       setDone(true);
+    } catch {
+      setStatus({
+        type: "err",
+        message: "Could not submit your claim. Please try again.",
+      });
+    } finally {
       setSubmitting(false);
-    }, 600);
+    }
   }
 
   if (done) {
