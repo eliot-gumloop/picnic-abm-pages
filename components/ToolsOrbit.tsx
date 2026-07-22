@@ -66,61 +66,63 @@ export function ToolsOrbit({ data, shown = true, chipNumber = "01" }: ToolsOrbit
           Your whole stack connects to Gumloop.{" "}
           <span className="section-note-accent">Tap any tool.</span>
         </p>
-        <div className="orbit" id="orbit">
-          <svg className="orbit-lines" id="orbitLines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            {data.tools.map(([name, _ids], i) => {
+        <div className="orbit-stage">
+          <div className="orbit" id="orbit">
+            <svg className="orbit-lines" id="orbitLines" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+              {data.tools.map(([name, _ids], i) => {
+                const { x, y } = orbitPos(i, data.tools.length);
+                return (
+                  <line
+                    key={name}
+                    x1={50}
+                    y1={50}
+                    x2={x}
+                    y2={y}
+                    data-idx={i}
+                    className={highlightIdx === i ? "on" : undefined}
+                  />
+                );
+              })}
+            </svg>
+            <div className="orbit-center" id="orbitCenter" aria-label="Gumloop">
+              <BrandMark size={44} />
+            </div>
+            {data.tools.map(([name, ids], i) => {
               const { x, y } = orbitPos(i, data.tools.length);
+
+              function handleKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  openModal(name, ids);
+                }
+              }
+
               return (
-                <line
+                <div
                   key={name}
-                  x1={50}
-                  y1={50}
-                  x2={x}
-                  y2={y}
-                  data-idx={i}
-                  className={highlightIdx === i ? "on" : undefined}
-                />
+                  className={`orbit-tile${name === "Salesforce" ? " pulse-ring" : ""}`}
+                  style={{ left: `${x}%`, top: `${y}%` }}
+                  tabIndex={0}
+                  role="button"
+                  aria-label={`${name}, see use cases`}
+                  onClick={() => openModal(name, ids)}
+                  onKeyDown={handleKeyDown}
+                  onMouseEnter={() => setHighlightIdx(i)}
+                  onMouseLeave={() => {
+                    if (!modal) setHighlightIdx(-1);
+                  }}
+                  onFocus={() => setHighlightIdx(i)}
+                  onBlur={() => {
+                    if (!modal) setHighlightIdx(-1);
+                  }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={ORBIT_LOGO_OVERRIDES[name] ?? data.logos[name]} alt={name} />
+                  <span className="tt-label">{name}</span>
+                </div>
               );
             })}
-          </svg>
-          <div className="orbit-center" id="orbitCenter" aria-label="Gumloop">
-            <BrandMark size={44} />
           </div>
-          {data.tools.map(([name, ids], i) => {
-            const { x, y } = orbitPos(i, data.tools.length);
-
-            function handleKeyDown(e: KeyboardEvent<HTMLDivElement>) {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                openModal(name, ids);
-              }
-            }
-
-            return (
-              <div
-                key={name}
-                className={`orbit-tile${name === "Salesforce" ? " pulse-ring" : ""}`}
-                style={{ left: `${x}%`, top: `${y}%` }}
-                tabIndex={0}
-                role="button"
-                aria-label={`${name}, see use cases`}
-                onClick={() => openModal(name, ids)}
-                onKeyDown={handleKeyDown}
-                onMouseEnter={() => setHighlightIdx(i)}
-                onMouseLeave={() => {
-                  if (!modal) setHighlightIdx(-1);
-                }}
-                onFocus={() => setHighlightIdx(i)}
-                onBlur={() => {
-                  if (!modal) setHighlightIdx(-1);
-                }}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={ORBIT_LOGO_OVERRIDES[name] ?? data.logos[name]} alt={name} />
-                <span className="tt-label">{name}</span>
-              </div>
-            );
-          })}
         </div>
         <div className="more-wrap">
           <a className="more-link big" href="https://www.gumloop.com/mcp" target="_blank" rel="noopener noreferrer">

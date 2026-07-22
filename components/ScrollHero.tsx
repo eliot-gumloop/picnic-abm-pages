@@ -11,29 +11,27 @@ const HERO_VIDEO_POSTER = "/picnic-food-poster.jpg";
 const SNACK_REVEAL_PROGRESS = 0.012;
 /** Ignore seeks smaller than ~1 frame at 30fps */
 const SEEK_EPS = 1 / 28;
-/** Coast friction after scroll stops (closer to 1 = longer glide) */
-const COAST_FRICTION = 0.935;
-const COAST_MIN_VELOCITY = 0.00012;
-/** Video must fully finish before leaving the hero scrub range */
+/** Video must fully finish before the page can scroll past the hero */
 const VIDEO_COMPLETE = 0.995;
+/** How many gesture pixels map to a full 0→1 scrub (higher = more scrolling) */
+const SCRUB_PIXELS = 2800;
+/** Max scrub speed on the first pass — extra flick energy is banked until the ending frame */
+const MAX_PROGRESS_PER_SECOND = 0.32;
+/** Scrub reverse should feel responsive after the first unlock */
+const MAX_REVERSE_PER_SECOND = 2.2;
+/** After a small reverse near the end, require a clear downward flick to leave */
+const REEXIT_BANK_PX = 56;
+/** If scrub is still above this, downward scroll exits; below it, re-scrub forward */
+const REEXIT_MIN_PROGRESS = 0.72;
+/** After unlock, ease toward snacks at most this many px/sec */
+const SNACKS_SETTLE_PX_PER_SECOND = 420;
+const SNACKS_SETTLE_EPS = 1.5;
 
 type ScrollHeroProps = {
   greetingName: string;
   selectedSnacks: SnackId[];
   onSnacksChange: (selected: SnackId[]) => void;
 };
-
-function getScrollProgress(wrap: HTMLElement): number {
-  const start = wrap.offsetTop;
-  const end = start + wrap.offsetHeight - window.innerHeight;
-  const range = end - start;
-  if (range <= 0) return 0;
-  return Math.min(1, Math.max(0, (window.scrollY - start) / range));
-}
-
-function getHeroScrollMax(wrap: HTMLElement): number {
-  return Math.max(0, wrap.offsetTop + wrap.offsetHeight - window.innerHeight);
-}
 
 function ScrollMouseIndicator() {
   return (
@@ -59,9 +57,6 @@ export function ScrollHero({
     const wrap = wrapRef.current;
     if (!video || !wrap) return;
 
-    document.documentElement.classList.remove("picnic-scroll-lock");
-    document.body.classList.remove("picnic-scroll-lock");
-
     video.muted = true;
     video.defaultMuted = true;
     video.playsInline = true;
@@ -74,21 +69,35 @@ export function ScrollHero({
     let reduced = media.matches;
 
     const durationRef = { current: 0 };
-    const scrollProgressRef = { current: 0 };
-    const videoProgressRef = { current: 0 };
-    const velocityRef = { current: 0 };
-    const lastScrollPRef = { current: 0 };
-    const lastScrollTimeRef = { current: performance.now() };
-    const isScrollingRef = { current: false };
+    const progressRef = { current: 0 };
     const isSeekingRef = { current: false };
     const needsSeekRef = { current: false };
-    const videoDoneRef = { current: reduced };
     const videoUnlockedRef = { current: false };
+    /** True once the ending frame has been reached */
+    const animationCompleteRef = { current: reduced };
+    /** True once page scroll is allowed */
+    const pageReleasedRef = { current: reduced };
+    /** After the first successful unlock, reverse is fast and shallow re-exit is instant */
+    const hasCompletedOnceRef = { current: reduced };
+    /** True after reversing far enough that the next down pass should re-scrub the video */
+    const replayScrubRef = { current: false };
+    /** After unlock, ease banked energy down only until snacks are centered */
+    const settleToSnacksRef = { current: false };
+    /** Gesture pixels waiting to be applied (scrub first, then snacks settle) */
+    const bankRef = { current: 0 };
+    /** -1 scroll up / reverse, +1 scroll down / forward */
+    const gestureDirRef = { current: 0 };
+    const lastDrainTimeRef = { current: performance.now() };
     const rafRef = { current: 0 };
-    let scrollStopTimer = 0;
-    let clamping = false;
+    const seekGenRef = { current: 0 };
+    let seekFallbackTimer = 0;
 
-    /** iOS often won't paint seek frames until a muted play() has run. */
+    const setPageLocked = (locked: boolean) => {
+      document.documentElement.classList.toggle("picnic-scroll-lock", locked);
+      document.body.classList.toggle("picnic-scroll-lock", locked);
+      wrap.classList.toggle("is-scrubbing", locked);
+    };
+
     const unlockVideoForScrub = () => {
       if (videoUnlockedRef.current) return;
       videoUnlockedRef.current = true;
@@ -112,9 +121,6 @@ export function ScrollHero({
       wrap.style.setProperty("--scroll-p", progress.toFixed(4));
     };
 
-    const isVideoDone = () =>
-      reduced || videoProgressRef.current >= VIDEO_COMPLETE;
-
     const revealFromProgress = (progress: number) => {
       if (progress > 0.01) setShowScrollPrompt(false);
       if (progress >= SNACK_REVEAL_PROGRESS || reduced) {
@@ -123,43 +129,55 @@ export function ScrollHero({
       }
     };
 
-    const clampToHeroIfNeeded = () => {
-      if (videoDoneRef.current || reduced) return;
-      const max = getHeroScrollMax(wrap);
-      if (window.scrollY > max + 0.5) {
-        clamping = true;
-        window.scrollTo(0, max);
-        requestAnimationFrame(() => {
-          clamping = false;
-        });
-      }
+    const frameAtEnd = () => {
+      if (!durationRef.current) return false;
+      return video.currentTime >= durationRef.current - 0.08;
+    };
+
+    const desiredTimeForProgress = (progress: number) => {
+      if (!durationRef.current) return 0;
+      return Math.min(
+        durationRef.current - 0.04,
+        Math.max(0, progress * durationRef.current),
+      );
     };
 
     const seekToProgress = () => {
       if (!durationRef.current || isSeekingRef.current) return;
 
-      const progress = videoProgressRef.current;
-      const targetTime = Math.min(
-        durationRef.current - 0.04,
-        Math.max(0, progress * durationRef.current),
-      );
+      const progress = progressRef.current;
+      const targetTime = desiredTimeForProgress(progress);
 
       if (Math.abs(video.currentTime - targetTime) < SEEK_EPS) {
         needsSeekRef.current = false;
+        maybeCompleteAndRelease();
         return;
       }
 
       isSeekingRef.current = true;
       needsSeekRef.current = false;
+      const seekGen = ++seekGenRef.current;
 
       const finish = () => {
         video.removeEventListener("seeked", finish);
-        window.clearTimeout(fallback);
+        if (seekGen !== seekGenRef.current) return;
+        window.clearTimeout(seekFallbackTimer);
         isSeekingRef.current = false;
+
+        // Progress may have moved while this seek was in flight — land on the live target.
+        const liveTarget = desiredTimeForProgress(progressRef.current);
+        if (Math.abs(video.currentTime - liveTarget) > SEEK_EPS) {
+          needsSeekRef.current = true;
+          seekToProgress();
+          return;
+        }
+
+        maybeCompleteAndRelease();
         if (needsSeekRef.current) seekToProgress();
       };
 
-      const fallback = window.setTimeout(finish, 120);
+      window.clearTimeout(seekFallbackTimer);
+      seekFallbackTimer = window.setTimeout(finish, 160);
       video.addEventListener("seeked", finish);
 
       try {
@@ -169,116 +187,210 @@ export function ScrollHero({
           video.currentTime = targetTime;
         }
       } catch {
-        window.clearTimeout(fallback);
+        window.clearTimeout(seekFallbackTimer);
         video.removeEventListener("seeked", finish);
         isSeekingRef.current = false;
       }
     };
 
-    const markDoneIfReady = () => {
-      if (!videoDoneRef.current && isVideoDone()) {
-        videoDoneRef.current = true;
-        videoProgressRef.current = 1;
-        scrollProgressRef.current = 1;
-        publishProgress(1);
+    const syncFromProgress = () => {
+      const progress = progressRef.current;
+      publishProgress(progress);
+      revealFromProgress(progress);
+      needsSeekRef.current = true;
+      if (!isSeekingRef.current) seekToProgress();
+      if (window.scrollY > 0 && !pageReleasedRef.current) {
+        window.scrollTo(0, 0);
       }
     };
 
-    const tick = () => {
-      if (!isScrollingRef.current && !reduced) {
-        if (Math.abs(velocityRef.current) > COAST_MIN_VELOCITY) {
-          scrollProgressRef.current = Math.min(
-            1,
-            Math.max(0, scrollProgressRef.current + velocityRef.current),
-          );
-          velocityRef.current *= COAST_FRICTION;
-          if (
-            (scrollProgressRef.current <= 0 && velocityRef.current < 0) ||
-            (scrollProgressRef.current >= 1 && velocityRef.current > 0)
-          ) {
-            velocityRef.current = 0;
-          }
-        } else {
-          velocityRef.current = 0;
+    const releasePage = () => {
+      if (pageReleasedRef.current) return;
+      pageReleasedRef.current = true;
+      animationCompleteRef.current = true;
+      hasCompletedOnceRef.current = true;
+      progressRef.current = 1;
+      publishProgress(1);
+      setPageLocked(false);
+    };
+
+    const reengageScrub = () => {
+      pageReleasedRef.current = false;
+      animationCompleteRef.current = false;
+      settleToSnacksRef.current = false;
+      // Shallow reverse can still instant-exit; deep reverse opts into a full replay.
+      replayScrubRef.current = false;
+      setPageLocked(true);
+      window.scrollTo(0, 0);
+    };
+
+    /** Jump back to the ending and unlock so the user isn't trapped re-scrubbing. */
+    const exitScrubToPage = (pageScrollPx = 0) => {
+      progressRef.current = 1;
+      publishProgress(1);
+      revealFromProgress(1);
+      bankRef.current = 0;
+      settleToSnacksRef.current = false;
+      replayScrubRef.current = false;
+      animationCompleteRef.current = true;
+      needsSeekRef.current = true;
+      if (!isSeekingRef.current) seekToProgress();
+      releasePage();
+      if (pageScrollPx > 0) window.scrollBy(0, pageScrollPx);
+    };
+
+    const getSnacksCenterScrollY = () => {
+      const el =
+        wrap.querySelector<HTMLElement>(".snack-picker-wrap") ||
+        wrap.querySelector<HTMLElement>(".snack-picker");
+      if (!el) return 0;
+      const rect = el.getBoundingClientRect();
+      const absoluteCenter = rect.top + window.scrollY + rect.height / 2;
+      return Math.max(0, absoluteCenter - window.innerHeight / 2);
+    };
+
+    /** When scrub + ending frame are done, unlock; banked energy eases to snacks. */
+    const maybeCompleteAndRelease = () => {
+      if (reduced || pageReleasedRef.current) return;
+      if (progressRef.current < VIDEO_COMPLETE || !frameAtEnd()) return;
+
+      progressRef.current = 1;
+      publishProgress(1);
+      animationCompleteRef.current = true;
+      replayScrubRef.current = false;
+      releasePage();
+      // Only use leftover downward bank to settle snacks into view — not free-coast.
+      if (bankRef.current > SNACKS_SETTLE_EPS) {
+        settleToSnacksRef.current = true;
+      } else {
+        bankRef.current = 0;
+        settleToSnacksRef.current = false;
+      }
+      requestDrain();
+    };
+
+    const requestDrain = () => {
+      if (!rafRef.current) rafRef.current = requestAnimationFrame(drainBank);
+    };
+
+    /**
+     * Drain banked gesture pixels:
+     * 1) into the video scrub (rate-limited) while locked
+     * 2) after unlock, slowly center the snacks list (no free page coast)
+     */
+    const drainBank = () => {
+      rafRef.current = 0;
+      if (reduced) {
+        bankRef.current = 0;
+        settleToSnacksRef.current = false;
+        return;
+      }
+
+      const now = performance.now();
+      const dt = Math.max(1, now - lastDrainTimeRef.current);
+      lastDrainTimeRef.current = now;
+
+      let bank = bankRef.current;
+
+      // Re-enter scrub when scrolling up at the top of the page.
+      if (pageReleasedRef.current && window.scrollY <= 1 && bank < 0) {
+        settleToSnacksRef.current = false;
+        reengageScrub();
+      }
+
+      if (!pageReleasedRef.current) {
+        // Near the ending after a short reverse: downward flick leaves the hero.
+        // After a deep reverse: play the scrub forward again (don't skip to the end).
+        if (
+          hasCompletedOnceRef.current &&
+          !replayScrubRef.current &&
+          gestureDirRef.current > 0 &&
+          bank > REEXIT_BANK_PX &&
+          progressRef.current >= REEXIT_MIN_PROGRESS
+        ) {
+          const leftover = Math.min(bank, window.innerHeight * 0.4);
+          exitScrubToPage(leftover);
+          return;
+        }
+
+        const rate =
+          bank < 0 ? MAX_REVERSE_PER_SECOND : MAX_PROGRESS_PER_SECOND;
+        const maxProgressStep = (rate * dt) / 1000;
+        const maxPixels = maxProgressStep * SCRUB_PIXELS;
+        let take = bank;
+        if (take > maxPixels) take = maxPixels;
+        if (take < -maxPixels) take = -maxPixels;
+
+        const prev = progressRef.current;
+        const next = Math.min(1, Math.max(0, prev + take / SCRUB_PIXELS));
+        const usedProgress = next - prev;
+        const usedPixels = usedProgress * SCRUB_PIXELS;
+
+        progressRef.current = next;
+        bank -= usedPixels;
+        bankRef.current = bank;
+
+        if (next < VIDEO_COMPLETE) {
+          animationCompleteRef.current = false;
+        }
+        if (next < REEXIT_MIN_PROGRESS) {
+          replayScrubRef.current = true;
+        }
+
+        syncFromProgress();
+
+        if (Math.abs(bankRef.current) > 0.01 || progressRef.current < VIDEO_COMPLETE || !frameAtEnd()) {
+          requestDrain();
+        }
+        return;
+      }
+
+      // Page unlocked with banked energy: ease until snacks are vertically centered.
+      if (!settleToSnacksRef.current || bank <= 0) {
+        bankRef.current = 0;
+        settleToSnacksRef.current = false;
+        return;
+      }
+
+      const target = getSnacksCenterScrollY();
+      const dist = target - window.scrollY;
+      if (dist <= SNACKS_SETTLE_EPS) {
+        bankRef.current = 0;
+        settleToSnacksRef.current = false;
+        return;
+      }
+
+      const maxStep = (SNACKS_SETTLE_PX_PER_SECOND * dt) / 1000;
+      const step = Math.min(dist, maxStep);
+      window.scrollBy(0, step);
+      // Consume bank so a huge flick still only settles to snacks.
+      bankRef.current = Math.max(0, bank - step);
+
+      if (target - window.scrollY > SNACKS_SETTLE_EPS) {
+        requestDrain();
+      } else {
+        bankRef.current = 0;
+        settleToSnacksRef.current = false;
+      }
+    };
+
+    /** Queue gesture energy; scrub consumes it first, page gets the rest after the ending frame. */
+    const queueGestureDelta = (deltaY: number) => {
+      if (reduced || Math.abs(deltaY) < 0.01) return false;
+
+      unlockVideoForScrub();
+      gestureDirRef.current = deltaY > 0 ? 1 : -1;
+
+      if (pageReleasedRef.current) {
+        // Only intercept when reversing back into the hero at the top.
+        if (!(window.scrollY <= 1 && (deltaY < 0 || bankRef.current < 0))) {
+          return false;
         }
       }
 
-      // At the end of the scrub range, drive video fully to completion
-      const atHeroEnd = getScrollProgress(wrap) >= 0.995;
-      if (atHeroEnd && !reduced) {
-        scrollProgressRef.current = 1;
-      }
-
-      const target = scrollProgressRef.current;
-      let current = videoProgressRef.current;
-      const delta = Math.abs(target - current);
-      const alpha = reduced
-        ? 1
-        : atHeroEnd
-          ? 0.35
-          : delta > 0.1
-            ? 0.28
-            : delta > 0.03
-              ? 0.18
-              : 0.12;
-      const next = current + (target - current) * alpha;
-
-      const stillCoasting = Math.abs(velocityRef.current) > COAST_MIN_VELOCITY;
-      const stillEasing = Math.abs(next - current) > 0.00025 || current !== target;
-
-      if (stillEasing || stillCoasting) {
-        videoProgressRef.current = stillEasing ? next : target;
-        current = videoProgressRef.current;
-        publishProgress(current);
-        revealFromProgress(current);
-        markDoneIfReady();
-        clampToHeroIfNeeded();
-        needsSeekRef.current = true;
-        if (!isSeekingRef.current) seekToProgress();
-        rafRef.current = requestAnimationFrame(tick);
-      } else {
-        videoProgressRef.current = target;
-        publishProgress(target);
-        revealFromProgress(target);
-        markDoneIfReady();
-        clampToHeroIfNeeded();
-        needsSeekRef.current = true;
-        if (!isSeekingRef.current) seekToProgress();
-        rafRef.current = 0;
-      }
-    };
-
-    const requestTick = () => {
-      if (!rafRef.current) rafRef.current = requestAnimationFrame(tick);
-    };
-
-    const updateFromScroll = () => {
-      if (clamping) return;
-
-      unlockVideoForScrub();
-      clampToHeroIfNeeded();
-
-      const now = performance.now();
-      const next = reduced ? 1 : getScrollProgress(wrap);
-      const dt = Math.max(8, now - lastScrollTimeRef.current);
-      const rawVelocity = ((next - lastScrollPRef.current) / dt) * 16;
-
-      velocityRef.current = velocityRef.current * 0.35 + rawVelocity * 0.65;
-      velocityRef.current = Math.max(-0.045, Math.min(0.045, velocityRef.current));
-
-      scrollProgressRef.current = next;
-      lastScrollPRef.current = next;
-      lastScrollTimeRef.current = now;
-      isScrollingRef.current = true;
-
-      window.clearTimeout(scrollStopTimer);
-      scrollStopTimer = window.setTimeout(() => {
-        isScrollingRef.current = false;
-        requestTick();
-      }, 90);
-
-      revealFromProgress(next);
-      requestTick();
+      bankRef.current += deltaY;
+      requestDrain();
+      return true;
     };
 
     const onLoaded = () => {
@@ -286,57 +398,33 @@ export function ScrollHero({
       durationRef.current = video.duration;
       unlockVideoForScrub();
       video.pause();
-      updateFromScroll();
+      syncFromProgress();
     };
 
     const onWheel = (event: WheelEvent) => {
-      if (videoDoneRef.current || reduced) return;
-      if (event.deltaY <= 0) return;
-      const max = getHeroScrollMax(wrap);
-      if (window.scrollY >= max - 1) {
-        event.preventDefault();
-        scrollProgressRef.current = 1;
-        requestTick();
-      }
+      if (reduced) return;
+      const consumed = queueGestureDelta(event.deltaY);
+      if (consumed) event.preventDefault();
     };
 
-    const touchStartY = { current: 0 };
+    const onWindowScroll = () => {
+      if (pageReleasedRef.current || reduced) return;
+      if (window.scrollY > 0) window.scrollTo(0, 0);
+    };
+
+    const touchLastY = { current: 0 };
     const onTouchStart = (event: TouchEvent) => {
-      touchStartY.current = event.touches[0]?.clientY ?? 0;
-      // User gesture fallback when autoplay unlock is blocked.
+      touchLastY.current = event.touches[0]?.clientY ?? 0;
       unlockVideoForScrub();
     };
+
     const onTouchMove = (event: TouchEvent) => {
-      if (videoDoneRef.current || reduced) return;
-      const y = event.touches[0]?.clientY ?? touchStartY.current;
-      const goingDown = y < touchStartY.current - 4;
-      if (!goingDown) return;
-      const max = getHeroScrollMax(wrap);
-      if (window.scrollY >= max - 1) {
-        event.preventDefault();
-        scrollProgressRef.current = 1;
-        requestTick();
-      }
-    };
-
-    if (reduced) {
-      setShowScrollPrompt(false);
-      setShowScrollIndicator(false);
-      setShowSnacks(true);
-      scrollProgressRef.current = 1;
-      videoProgressRef.current = 1;
-      videoDoneRef.current = true;
-      publishProgress(1);
-    }
-
-    video.addEventListener("loadedmetadata", onLoaded);
-    video.addEventListener("loadeddata", onLoaded);
-    if (video.readyState >= 1) onLoaded();
-
-    let scrollRaf = 0;
-    const onScroll = () => {
-      cancelAnimationFrame(scrollRaf);
-      scrollRaf = requestAnimationFrame(updateFromScroll);
+      if (reduced) return;
+      const y = event.touches[0]?.clientY ?? touchLastY.current;
+      const deltaY = touchLastY.current - y;
+      touchLastY.current = y;
+      const consumed = queueGestureDelta(deltaY);
+      if (consumed && event.cancelable) event.preventDefault();
     };
 
     const onMediaChange = () => {
@@ -345,84 +433,102 @@ export function ScrollHero({
         setShowScrollPrompt(false);
         setShowScrollIndicator(false);
         setShowSnacks(true);
-        scrollProgressRef.current = 1;
-        videoProgressRef.current = 1;
-        velocityRef.current = 0;
-        videoDoneRef.current = true;
+        progressRef.current = 1;
+        animationCompleteRef.current = true;
+        pageReleasedRef.current = true;
+        bankRef.current = 0;
+        publishProgress(1);
+        setPageLocked(false);
+      } else if (!pageReleasedRef.current) {
+        setPageLocked(true);
       }
-      updateFromScroll();
     };
 
-    window.addEventListener("scroll", onScroll, { passive: true });
+    if (reduced) {
+      setShowScrollPrompt(false);
+      setShowScrollIndicator(false);
+      setShowSnacks(true);
+      progressRef.current = 1;
+      publishProgress(1);
+      setPageLocked(false);
+    } else {
+      setPageLocked(true);
+      window.scrollTo(0, 0);
+      publishProgress(0);
+    }
+
+    video.addEventListener("loadedmetadata", onLoaded);
+    video.addEventListener("loadeddata", onLoaded);
+    if (video.readyState >= 1) onLoaded();
+
     window.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("scroll", onWindowScroll, { passive: false });
     window.addEventListener("touchstart", onTouchStart, { passive: true });
     window.addEventListener("touchmove", onTouchMove, { passive: false });
-    window.addEventListener("resize", updateFromScroll);
     media.addEventListener("change", onMediaChange);
-    updateFromScroll();
 
     return () => {
       cancelAnimationFrame(rafRef.current);
-      cancelAnimationFrame(scrollRaf);
-      window.clearTimeout(scrollStopTimer);
+      window.clearTimeout(seekFallbackTimer);
+      setPageLocked(false);
       video.removeEventListener("loadedmetadata", onLoaded);
       video.removeEventListener("loadeddata", onLoaded);
-      window.removeEventListener("scroll", onScroll);
       window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("scroll", onWindowScroll);
       window.removeEventListener("touchstart", onTouchStart);
       window.removeEventListener("touchmove", onTouchMove);
-      window.removeEventListener("resize", updateFromScroll);
       media.removeEventListener("change", onMediaChange);
     };
   }, []);
 
   return (
     <div className="scroll-hero-wrap" ref={wrapRef}>
-      <div className="scroll-hero-sticky">
-        <div className="scroll-hero-atmosphere" aria-hidden="true" />
-        <div className="scroll-hero-content">
-          <h1 className="hero-title">
-            <span className="hero-greet">Hi {greetingName},</span>
-            <span className="hero-line2">
-              We want to send you a <span className="hl-accent">picnic basket</span>
-            </span>
-          </h1>
+      <div className="scroll-hero-scrub">
+        <div className="scroll-hero-sticky">
+          <div className="scroll-hero-atmosphere" aria-hidden="true" />
+          <div className="scroll-hero-content">
+            <h1 className="hero-title">
+              <span className="hero-greet">Hi {greetingName},</span>
+              <span className="hero-line2">
+                We want to send you a <span className="hl-accent">picnic basket</span>
+              </span>
+            </h1>
 
-          <div className={`scroll-hero-scroll-prompt${showScrollPrompt ? "" : " is-hidden"}`}>
-            <span>Scroll to pick your snacks</span>
-          </div>
+            <div className={`scroll-hero-scroll-prompt${showScrollPrompt ? "" : " is-hidden"}`}>
+              <span>Scroll to pick your snacks</span>
+            </div>
 
-          <div className="scroll-hero-video-box">
-            <video
-              ref={videoRef}
-              className="scroll-hero-video"
-              src={HERO_VIDEO_SRC}
-              poster={HERO_VIDEO_POSTER}
-              muted
-              playsInline
-              preload="auto"
-              aria-hidden="true"
-            />
-            <div className="scroll-hero-gradient" />
-            {showScrollIndicator && (
-              <div className="scroll-hero-video-indicator">
-                <ScrollMouseIndicator />
-              </div>
-            )}
-          </div>
+            <div className="scroll-hero-video-box">
+              <video
+                ref={videoRef}
+                className="scroll-hero-video"
+                src={HERO_VIDEO_SRC}
+                poster={HERO_VIDEO_POSTER}
+                muted
+                playsInline
+                preload="auto"
+                aria-hidden="true"
+              />
+              <div className="scroll-hero-gradient" />
+              {showScrollIndicator && (
+                <div className="scroll-hero-video-indicator">
+                  <ScrollMouseIndicator />
+                </div>
+              )}
+            </div>
 
-          <div className={`snack-picker-wrap${showSnacks ? " is-visible" : ""}`}>
-            {showSnacks && (
-              <SnackPicker selected={selectedSnacks} onChange={onSnacksChange} />
-            )}
-          </div>
+            <div className={`snack-picker-wrap${showSnacks ? " is-visible" : ""}`}>
+              {showSnacks && (
+                <SnackPicker selected={selectedSnacks} onChange={onSnacksChange} />
+              )}
+            </div>
 
-          <div className={`claim-after-snacks${showSnacks ? " is-visible" : ""}`}>
-            {showSnacks && <ClaimForm selectedSnacks={selectedSnacks} />}
+            <div className={`claim-after-snacks${showSnacks ? " is-visible" : ""}`}>
+              {showSnacks && <ClaimForm selectedSnacks={selectedSnacks} />}
+            </div>
           </div>
         </div>
       </div>
     </div>
   );
 }
-

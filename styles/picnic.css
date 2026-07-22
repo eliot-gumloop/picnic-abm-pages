@@ -65,11 +65,12 @@ html.picnic-scroll-lock body {
   height: 100%;
 }
 
-html.picnic-scroll-lock .scroll-hero-wrap {
+html.picnic-scroll-lock .scroll-hero-wrap,
+.scroll-hero-wrap.is-scrubbing {
+  height: 100svh;
   max-height: 100svh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {
@@ -86,6 +87,13 @@ body {
   max-width: 920px;
   margin: 0 auto;
   padding: 26px 24px 64px;
+  box-sizing: border-box;
+}
+@media (max-width: 520px) {
+  .page {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
 }
 
 /* header */
@@ -408,11 +416,28 @@ body {
 }
 
 /* orbit */
+#toolsSection {
+  width: 100%;
+}
+.orbit-stage {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 8px 0 0;
+  /* Keep overflowing tile labels from shifting the visual center */
+  overflow: visible;
+}
 .orbit {
   position: relative;
   width: min(560px, 100%);
+  max-width: 100%;
   aspect-ratio: 1 / 1;
-  margin: 8px auto 0;
+  margin: 0;
+  flex: none;
+  /* Optical center stays on the page midpoint across breakpoints */
+  left: 0;
+  right: 0;
 }
 .orbit-lines {
   position: absolute;
@@ -420,6 +445,7 @@ body {
   width: 100%;
   height: 100%;
   overflow: visible;
+  pointer-events: none;
 }
 .orbit-lines line {
   stroke: var(--hairline);
@@ -1078,13 +1104,17 @@ body {
   background: rgba(180, 140, 30, 0.12);
 }
 
-/* scroll hero — sticky scrub with post-scroll coast */
+/* scroll hero — page locked; scrub driven by rate-limited gestures */
 .scroll-hero-wrap {
   --scroll-p: 0;
   position: relative;
-  height: 240vh;
+  height: auto;
   min-height: 0;
   z-index: 2;
+}
+.scroll-hero-scrub {
+  position: relative;
+  height: auto;
 }
 .scroll-hero-atmosphere {
   position: absolute;
@@ -1280,7 +1310,6 @@ body {
   .scroll-hero-content .hero-line2 {
     font-size: clamp(1.375rem, 6vw, 1.875rem);
   }
-  .scroll-hero-wrap { height: 200vh; }
   .scroll-hero-sticky { padding: 20px 16px 24px; }
 }
 
@@ -1461,7 +1490,8 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .scroll-hero-wrap { height: auto; }
+  .scroll-hero-wrap { height: auto; max-height: none; overflow: visible; }
+  .scroll-hero-scrub { height: auto !important; }
   .scroll-hero-sticky { position: relative; min-height: auto; overflow: visible; }
   .scroll-hero-scroll-prompt { animation: none; }
   .scroll-mouse-dot { animation: none; }
