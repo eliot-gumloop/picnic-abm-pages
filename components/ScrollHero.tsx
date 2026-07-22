@@ -33,6 +33,11 @@ type ScrollHeroProps = {
   onSnacksChange: (selected: SnackId[]) => void;
 };
 
+function prefersTouchHero() {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+}
+
 function ScrollMouseIndicator() {
   return (
     <div className="scroll-mouse-indicator" aria-hidden="true">
@@ -67,6 +72,157 @@ export function ScrollHero({
 
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
     let reduced = media.matches;
+
+    const publishProgress = (progress: number) => {
+      wrap.style.setProperty("--scroll-p", progress.toFixed(4));
+    };
+
+    const getSnacksCenterScrollY = () => {
+      const el =
+        wrap.querySelector<HTMLElement>(".snack-picker-wrap") ||
+        wrap.querySelector<HTMLElement>(".snack-picker");
+      if (!el) return 0;
+      const rect = el.getBoundingClientRect();
+      const absoluteCenter = rect.top + window.scrollY + rect.height / 2;
+      return Math.max(0, absoluteCenter - window.innerHeight / 2);
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Touch / phone: first swipe → play video + show snacks; then normal */
+    /* scroll. Video freezes on end frame when done (wherever you are).   */
+    /* Desktop scrub path below is unchanged.                             */
+    /* ------------------------------------------------------------------ */
+    if (prefersTouchHero()) {
+      let played = false;
+      let finished = false;
+      const touchStartY = { current: 0 };
+      /** Pixels of downward swipe required to count as the activating scroll */
+      const ACTIVATE_SWIPE_PX = 28;
+
+      const revealSnacks = () => {
+        setShowScrollPrompt(false);
+        setShowScrollIndicator(false);
+        setShowSnacks(true);
+      };
+
+      const freezeEndFrame = () => {
+        video.pause();
+        if (Number.isFinite(video.duration) && video.duration > 0) {
+          const end = Math.max(0, video.duration - 0.05);
+          if (Math.abs(video.currentTime - end) > 0.04) {
+            try {
+              video.currentTime = end;
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+        publishProgress(1);
+      };
+
+      const finishPlayback = () => {
+        if (finished) return;
+        finished = true;
+        // Keep snacks visible; only lock the video on the end frame.
+        freezeEndFrame();
+        setShowSnacks(true);
+      };
+
+      const startPlayback = () => {
+        if (played || reduced) return;
+        played = true;
+        // Opening → video playing with snacks list below.
+        revealSnacks();
+        video.muted = true;
+        video.playsInline = true;
+
+        const attempt = video.play();
+        if (attempt && typeof attempt.then === "function") {
+          attempt.catch(() => {
+            finishPlayback();
+          });
+        }
+      };
+
+      const onTimeUpdate = () => {
+        if (!Number.isFinite(video.duration) || video.duration <= 0) return;
+        const p = Math.min(1, Math.max(0, video.currentTime / video.duration));
+        publishProgress(p);
+        if (p >= VIDEO_COMPLETE) finishPlayback();
+      };
+
+      const onEnded = () => {
+        finishPlayback();
+      };
+
+      const onTouchStart = (event: TouchEvent) => {
+        touchStartY.current = event.touches[0]?.clientY ?? 0;
+      };
+
+      const onTouchMove = (event: TouchEvent) => {
+        if (reduced) return;
+
+        // After the first activating swipe, never intercept — native page scroll.
+        if (played) return;
+
+        const y = event.touches[0]?.clientY ?? touchStartY.current;
+        const deltaY = touchStartY.current - y; // finger up = scroll down
+
+        if (deltaY <= 0) return;
+
+        // Hold the opening screen still until activation.
+        if (event.cancelable) event.preventDefault();
+
+        if (deltaY >= ACTIVATE_SWIPE_PX) {
+          window.scrollTo(0, 0);
+          startPlayback();
+        }
+      };
+
+      const onScroll = () => {
+        // After the video ends, stay on the end frame even if they scroll away/back.
+        if (finished) freezeEndFrame();
+      };
+
+      const onMediaChange = () => {
+        reduced = media.matches;
+        if (reduced) {
+          revealSnacks();
+          publishProgress(1);
+          video.pause();
+        }
+      };
+
+      document.documentElement.classList.remove("picnic-scroll-lock");
+      document.body.classList.remove("picnic-scroll-lock");
+      wrap.classList.remove("is-scrubbing");
+      publishProgress(0);
+
+      if (reduced) {
+        revealSnacks();
+        publishProgress(1);
+      }
+
+      video.addEventListener("timeupdate", onTimeUpdate);
+      video.addEventListener("ended", onEnded);
+      window.addEventListener("touchstart", onTouchStart, { passive: true });
+      window.addEventListener("touchmove", onTouchMove, { passive: false });
+      window.addEventListener("scroll", onScroll, { passive: true });
+      media.addEventListener("change", onMediaChange);
+
+      return () => {
+        video.removeEventListener("timeupdate", onTimeUpdate);
+        video.removeEventListener("ended", onEnded);
+        window.removeEventListener("touchstart", onTouchStart);
+        window.removeEventListener("touchmove", onTouchMove);
+        window.removeEventListener("scroll", onScroll);
+        media.removeEventListener("change", onMediaChange);
+      };
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Desktop / fine pointer: existing scrub-lock experience (unchanged) */
+    /* ------------------------------------------------------------------ */
 
     const durationRef = { current: 0 };
     const progressRef = { current: 0 };
@@ -115,10 +271,6 @@ export function ScrollHero({
       } else {
         settle();
       }
-    };
-
-    const publishProgress = (progress: number) => {
-      wrap.style.setProperty("--scroll-p", progress.toFixed(4));
     };
 
     const revealFromProgress = (progress: number) => {
@@ -237,16 +389,6 @@ export function ScrollHero({
       if (!isSeekingRef.current) seekToProgress();
       releasePage();
       if (pageScrollPx > 0) window.scrollBy(0, pageScrollPx);
-    };
-
-    const getSnacksCenterScrollY = () => {
-      const el =
-        wrap.querySelector<HTMLElement>(".snack-picker-wrap") ||
-        wrap.querySelector<HTMLElement>(".snack-picker");
-      if (!el) return 0;
-      const rect = el.getBoundingClientRect();
-      const absoluteCenter = rect.top + window.scrollY + rect.height / 2;
-      return Math.max(0, absoluteCenter - window.innerHeight / 2);
     };
 
     /** When scrub + ending frame are done, unlock; banked energy eases to snacks. */
